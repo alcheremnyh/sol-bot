@@ -214,13 +214,10 @@ impl HolderCache {
     async fn fetch_holder_count(
         rpc_client: &SolanaRpcClient,
         mint_str: &str,
+        api_timeout: Duration,
     ) -> Result<usize> {
         let mint = Pubkey::from_str(mint_str)
             .context("Invalid mint address")?;
-
-        // Apply API-level timeout (45 seconds max for API requests)
-        // This is shorter than RPC timeout to fail fast for API users
-        let api_timeout = Duration::from_secs(45);
         let fetch_result = tokio::time::timeout(
             api_timeout,
             rpc_client.get_token_accounts_by_mint(&mint)
