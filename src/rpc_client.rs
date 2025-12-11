@@ -54,7 +54,7 @@ impl SolanaRpcClient {
             match self._get_token_accounts_by_mint(mint).await {
                 Ok(accounts) => {
                     if attempt > 0 {
-                        info!("Successfully retrieved accounts after {} retries", attempt);
+                        info!("Successfully retrieved  accounts after {} retries", attempt);
                     }
                     return Ok(accounts);
                 }
