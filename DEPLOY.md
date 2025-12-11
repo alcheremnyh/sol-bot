@@ -1,5 +1,24 @@
 # Production Deployment Guide
 
+## Настройка GitHub Actions (опционально)
+
+Если хотите использовать автоматический деплой через GitHub Actions:
+
+1. **Добавьте secrets в GitHub репозиторий:**
+   - `Settings` → `Secrets and variables` → `Actions`
+   - Добавьте (опционально):
+     - `DOCKER_USERNAME` - для публикации образа в Docker Hub
+     - `DOCKER_PASSWORD` - пароль Docker Hub
+   - Добавьте (для деплоя на сервер):
+     - `DEPLOY_HOST` - IP адрес сервера
+     - `DEPLOY_USER` - пользователь для SSH
+     - `DEPLOY_SSH_KEY` - приватный SSH ключ
+     - `DEPLOY_PORT` - SSH порт (по умолчанию 22)
+
+2. **Workflow запустится автоматически** при push в ветки `main` или `prod`
+
+**Примечание:** Если secrets не настроены, workflow просто соберет образ без публикации и деплоя.
+
 ## Быстрый деплой
 
 ### Windows (PowerShell)
