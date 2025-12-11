@@ -1,0 +1,55 @@
+version: '3.8'
+
+services:
+  solana-holder-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: solana-holder-bot:latest
+    container_name: solana-holder-bot-prod
+    restart: unless-stopped
+    ports:
+      - "56789:56789"  # Expose API port to host
+    environment:
+      - RUST_LOG=info
+      - RPC_URL=${RPC_URL:-https://api.mainnet-beta.solana.com}
+      - MINT_ADDRESS=${MINT_ADDRESS}
+      - INTERVAL=${INTERVAL:-30}
+      - API_PORT=56789
+      - CACHE_TTL=${CACHE_TTL:-30}
+      - MAX_RETRIES=${MAX_RETRIES:-3}
+      - TIMEOUT=${TIMEOUT:-30}
+    command:
+      - ./solana-holder-bot
+      - ${MINT_ADDRESS}
+      - --rpc-url
+      - ${RPC_URL:-https://api.mainnet-beta.solana.com}
+      - --interval
+      - ${INTERVAL:-30}
+      - --api
+      - --api-port
+      - "56789"
+      - --cache-ttl
+      - ${CACHE_TTL:-30}
+      - --max-retries
+      - ${MAX_RETRIES:-3}
+      - --timeout
+      - ${TIMEOUT:-30}
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:56789/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - solana-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  solana-network:
+    driver: bridge
+

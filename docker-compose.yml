@@ -1,0 +1,36 @@
+version: '3.8'
+
+# Development/Default compose file
+# For production, use: docker-compose -f docker-compose.prod.yml
+
+services:
+  solana-holder-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: solana-holder-bot:dev
+    container_name: solana-holder-bot-dev
+    restart: unless-stopped
+    ports:
+      - "56789:56789"
+    environment:
+      - RUST_LOG=debug
+    command:
+      - ./solana-holder-bot
+      - 9AvytnUKsLxPxFHFqS6VLxaxt5p6BhYNr53SD2Chpump
+      - --rpc-url
+      - https://api.mainnet-beta.solana.com
+      - --interval
+      - "30"
+      - --api
+      - --api-port
+      - "56789"
+      - --cache-ttl
+      - "30"
+    networks:
+      - solana-network
+
+networks:
+  solana-network:
+    driver: bridge
+
