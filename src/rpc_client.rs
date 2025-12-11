@@ -14,6 +14,7 @@ use tracing::{debug, info, warn};
 pub struct SolanaRpcClient {
     client: RpcClient,
     max_retries: u32,
+    #[allow(dead_code)]
     timeout: Duration,
 }
 

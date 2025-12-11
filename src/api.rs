@@ -14,13 +14,14 @@ use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::time::{interval, Duration};
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
 /// Cache entry for holder count
 #[derive(Debug, Clone)]
-struct HolderCacheEntry {
+pub struct HolderCacheEntry {
     count: usize,
     timestamp: u64,
+    #[allow(dead_code)]
     mint: Pubkey,
 }
 
@@ -56,7 +57,8 @@ impl HolderCache {
                 // Collect all mints that need refresh
                 {
                     let cache_read = cache.read().await;
-                    mints_to_refresh = cache_read.keys().cloned().collect();
+                    let keys: Vec<String> = cache_read.keys().cloned().collect();
+                    mints_to_refresh = keys;
                 }
 
                 // Refresh each mint
