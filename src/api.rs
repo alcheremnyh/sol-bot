@@ -6,6 +6,7 @@ use axum::{
     routing::get,
     Router,
 };
+use serde::Serialize;
 use solana_program::pubkey::Pubkey;
 use crate::rpc_client::SolanaRpcClient;
 use crate::token_monitor::extract_holders;
@@ -23,13 +24,17 @@ pub struct HolderCacheEntry {
     timestamp: u64,
     #[allow(dead_code)]
     mint: Pubkey,
+    request_count: u64,  // Количество запросов для этого токена
+    first_seen: u64,      // Когда токен был впервые запрошен
 }
 
 /// Cache for holder counts with automatic refresh
+/// Limited to 2 tokens maximum - oldest token is removed when adding a third
 pub struct HolderCache {
     cache: Arc<RwLock<HashMap<String, HolderCacheEntry>>>,
     rpc_client: Arc<SolanaRpcClient>,
     refresh_interval: Duration,
+    max_tokens: usize,  // Максимальное количество токенов в кэше
 }
 
 impl HolderCache {
@@ -38,6 +43,7 @@ impl HolderCache {
             cache: Arc::new(RwLock::new(HashMap::new())),
             rpc_client,
             refresh_interval: Duration::from_secs(refresh_interval_secs),
+            max_tokens: 2,  // Ограничение: максимум 2 токена
         }
     }
 
@@ -70,13 +76,27 @@ impl HolderCache {
                                 Err(_) => continue,
                             };
 
+                            let now = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap()
+                                .as_secs();
+                            
+                            // Сохраняем существующие данные если есть
+                            let (request_count, first_seen) = {
+                                let cache_read = cache.read().await;
+                                if let Some(existing) = cache_read.get(mint_str) {
+                                    (existing.request_count, existing.first_seen)
+                                } else {
+                                    (0, now)
+                                }
+                            };
+
                             let entry = HolderCacheEntry {
                                 count,
-                                timestamp: std::time::SystemTime::now()
-                                    .duration_since(std::time::UNIX_EPOCH)
-                                    .unwrap()
-                                    .as_secs(),
+                                timestamp: now,
                                 mint,
+                                request_count,
+                                first_seen,
                             };
 
                             let mut cache_write = cache.write().await;
@@ -94,36 +114,87 @@ impl HolderCache {
 
     /// Get holder count from cache or fetch if not cached
     pub async fn get_holder_count(&self, mint_str: &str) -> Result<HolderCacheEntry> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
         // Check cache first
         {
-            let cache_read = self.cache.read().await;
-            if let Some(entry) = cache_read.get(mint_str) {
+            let mut cache_write = self.cache.write().await;
+            if let Some(entry) = cache_write.get_mut(mint_str) {
+                // Увеличиваем счетчик запросов
+                entry.request_count += 1;
+                info!("Cache hit for {} (request #{}), returning cached data", mint_str, entry.request_count);
                 return Ok(entry.clone());
             }
         }
 
         // Not in cache, fetch it
-        info!("Cache miss for {}, fetching...", mint_str);
+        info!("Cache miss for {}, fetching from RPC...", mint_str);
         let count = Self::fetch_holder_count(&self.rpc_client, mint_str).await?;
         let mint = Pubkey::from_str(mint_str)
             .context("Invalid mint address")?;
 
         let entry = HolderCacheEntry {
             count,
-            timestamp: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
+            timestamp: now,
             mint,
+            request_count: 1,  // Первый запрос
+            first_seen: now,   // Впервые запрошен сейчас
         };
 
-        // Store in cache
+        // Store in cache (with limit of 2 tokens)
         {
             let mut cache_write = self.cache.write().await;
+            
+            // Если кэш полон и добавляется новый токен, удаляем самый старый
+            if cache_write.len() >= self.max_tokens && !cache_write.contains_key(mint_str) {
+                // Находим токен с самым старым timestamp (первый добавленный)
+                let oldest_mint = cache_write
+                    .iter()
+                    .min_by_key(|(_, entry)| entry.timestamp)
+                    .map(|(mint, _)| mint.clone());
+                
+                if let Some(old_mint) = oldest_mint {
+                    cache_write.remove(&old_mint);
+                    info!("Removed oldest token {} from cache (limit: {} tokens)", old_mint, self.max_tokens);
+                }
+            }
+            
             cache_write.insert(mint_str.to_string(), entry.clone());
+            info!("Added {} to cache (total tracked tokens: {}/{})", mint_str, cache_write.len(), self.max_tokens);
         }
 
         Ok(entry)
+    }
+
+    /// Get list of all tracked tokens with statistics
+    pub async fn get_tracked_tokens(&self) -> Vec<TokenStats> {
+        let cache_read = self.cache.read().await;
+        cache_read
+            .iter()
+            .map(|(mint, entry)| TokenStats {
+                mint: mint.clone(),
+                holders: entry.count,
+                last_updated: entry.timestamp,
+                request_count: entry.request_count,
+                first_seen: entry.first_seen,
+            })
+            .collect()
+    }
+
+    /// Get cache statistics
+    pub async fn get_cache_stats(&self) -> CacheStats {
+        let cache_read = self.cache.read().await;
+        let total_tokens = cache_read.len();
+        let total_requests: u64 = cache_read.values().map(|e| e.request_count).sum();
+        
+        CacheStats {
+            total_tracked_tokens: total_tokens,
+            total_requests,
+            cache_size_bytes: std::mem::size_of_val(&*cache_read) as u64,
+        }
     }
 
     /// Fetch holder count from RPC
@@ -166,12 +237,16 @@ async fn get_holders(
     }
 
     match cache.get_holder_count(&mint_str).await {
-        Ok(entry) => Ok(Json(HolderResponse {
-            mint: mint_str,
-            holders: entry.count,
-            timestamp: entry.timestamp,
-            cached: true, // Always cached after first fetch
-        })),
+        Ok(entry) => {
+            // Проверяем, был ли это кэш или новый запрос
+            let was_cached = entry.request_count > 1;
+            Ok(Json(HolderResponse {
+                mint: mint_str,
+                holders: entry.count,
+                timestamp: entry.timestamp,
+                cached: was_cached,
+            }))
+        },
         Err(e) => {
             error!("Error getting holder count: {}", e);
             Err(StatusCode::INTERNAL_SERVER_ERROR)
@@ -187,11 +262,47 @@ async fn health_check() -> Json<serde_json::Value> {
     }))
 }
 
+/// Statistics for a tracked token
+#[derive(Debug, Clone, Serialize)]
+pub struct TokenStats {
+    pub mint: String,
+    pub holders: usize,
+    pub last_updated: u64,
+    pub request_count: u64,
+    pub first_seen: u64,
+}
+
+/// Cache statistics
+#[derive(Debug, Serialize)]
+pub struct CacheStats {
+    pub total_tracked_tokens: usize,
+    pub total_requests: u64,
+    pub cache_size_bytes: u64,
+}
+
+/// Get list of all tracked tokens
+async fn get_tracked_tokens(
+    axum::extract::State(cache): axum::extract::State<Arc<HolderCache>>,
+) -> Json<Vec<TokenStats>> {
+    let tokens = cache.get_tracked_tokens().await;
+    Json(tokens)
+}
+
+/// Get cache statistics
+async fn get_cache_stats(
+    axum::extract::State(cache): axum::extract::State<Arc<HolderCache>>,
+) -> Json<CacheStats> {
+    let stats = cache.get_cache_stats().await;
+    Json(stats)
+}
+
 /// Create API router
 pub fn create_api_router(cache: Arc<HolderCache>) -> Router {
     Router::new()
         .route("/holders/:mint", get(get_holders))
         .route("/health", get(health_check))
+        .route("/tokens", get(get_tracked_tokens))
+        .route("/stats", get(get_cache_stats))
         .with_state(cache)
         .layer(tower_http::cors::CorsLayer::permissive())
 }
@@ -211,6 +322,8 @@ pub async fn start_api_server(
     info!("Endpoints:");
     info!("  GET /holders/:mint - Get holder count for token");
     info!("  GET /health - Health check");
+    info!("  GET /tokens - Get list of all tracked tokens");
+    info!("  GET /stats - Get cache statistics");
 
     axum::serve(listener, app)
         .await
