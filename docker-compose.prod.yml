@@ -8,8 +8,7 @@ services:
     image: solana-holder-bot:latest
     container_name: solana-holder-bot-prod
     restart: unless-stopped
-    ports:
-      - "56789:56789"  # Expose API port to host
+    network_mode: host  # Используем сеть хоста напрямую
     environment:
       - RUST_LOG=info
       - RPC_URL=${RPC_URL:-https://api.mainnet-beta.solana.com}
@@ -41,15 +40,9 @@ services:
       timeout: 10s
       retries: 3
       start_period: 10s
-    networks:
-      - solana-network
     logging:
       driver: "json-file"
       options:
         max-size: "10m"
         max-file: "3"
-
-networks:
-  solana-network:
-    driver: bridge
 

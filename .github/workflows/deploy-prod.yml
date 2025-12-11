@@ -57,7 +57,7 @@ jobs:
           docker run -d \
             --name solana-holder-bot-prod \
             --restart unless-stopped \
-            -p 56789:56789 \
+            --network host \
             -e MINT_ADDRESS="${MINT_ADDRESS}" \
             -e RPC_URL="${RPC_URL}" \
             -e INTERVAL="${INTERVAL}" \
