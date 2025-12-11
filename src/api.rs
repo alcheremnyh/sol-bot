@@ -63,8 +63,7 @@ impl HolderCache {
                 // Collect all mints that need refresh
                 {
                     let cache_read = cache.read().await;
-                    let keys: Vec<String> = cache_read.keys().cloned().collect();
-                    mints_to_refresh = keys;
+                    mints_to_refresh = cache_read.keys().cloned().collect();
                 }
 
                 // Refresh each mint

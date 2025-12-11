@@ -94,7 +94,6 @@ impl SolanaRpcClient {
                 }
                 Err(_) => {
                     // Timeout occurred
-                    let elapsed = start_time.elapsed();
                     let timeout_error = anyhow::anyhow!(
                         "RPC request timed out after {:?} (attempt {}/{})",
                         self.timeout,
