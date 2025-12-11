@@ -1,5 +1,5 @@
 # Multi-stage build for production
-FROM rust:1.75-slim as builder
+FROM rust:1.83-slim as builder
 
 ARG BUILD_DATE
 ARG VCS_REF
