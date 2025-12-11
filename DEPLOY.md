@@ -1,23 +1,26 @@
 # Production Deployment Guide
 
-## Настройка GitHub Actions (опционально)
+## Настройка GitHub Actions (self-hosted runner)
 
-Если хотите использовать автоматический деплой через GitHub Actions:
+Для автоматического деплоя через GitHub Actions:
 
-1. **Добавьте secrets в GitHub репозиторий:**
-   - `Settings` → `Secrets and variables` → `Actions`
-   - Добавьте (опционально):
-     - `DOCKER_USERNAME` - для публикации образа в Docker Hub
-     - `DOCKER_PASSWORD` - пароль Docker Hub
-   - Добавьте (для деплоя на сервер):
-     - `DEPLOY_HOST` - IP адрес сервера
-     - `DEPLOY_USER` - пользователь для SSH
-     - `DEPLOY_SSH_KEY` - приватный SSH ключ
-     - `DEPLOY_PORT` - SSH порт (по умолчанию 22)
+1. **Настройте self-hosted runner на вашем сервере:**
+   - `Settings` → `Actions` → `Runners` → `New self-hosted runner`
+   - Следуйте инструкциям для установки runner на сервере
 
-2. **Workflow запустится автоматически** при push в ветки `main` или `prod`
+2. **Настройте переменные (опционально):**
+   - `Settings` → `Secrets and variables` → `Actions` → `Variables`
+   - Добавьте переменные (будут использованы значения по умолчанию, если не указаны):
+     - `MINT_ADDRESS` - адрес токена для мониторинга
+     - `RPC_URL` - Solana RPC endpoint
+     - `INTERVAL` - интервал опроса (по умолчанию 30)
+     - `CACHE_TTL` - время жизни кэша (по умолчанию 30)
+     - `MAX_RETRIES` - максимум повторных попыток (по умолчанию 3)
+     - `TIMEOUT` - таймаут RPC запроса (по умолчанию 30)
 
-**Примечание:** Если secrets не настроены, workflow просто соберет образ без публикации и деплоя.
+3. **Workflow запустится автоматически** при push в ветки `main` или `prod`
+
+**Примечание:** Workflow использует self-hosted runner, который должен быть установлен на сервере где будет запускаться контейнер.
 
 ## Быстрый деплой
 

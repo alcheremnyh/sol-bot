@@ -1,17 +1,16 @@
-name: Deploy to Production
+name: Docker Deploy
 
 on:
   push:
     branches:
       - main
-      - prod
-    tags:
-      - 'v*'
+  workflow_dispatch:
 
 jobs:
   build-and-deploy:
-    runs-on: ubuntu-latest
-    
+    runs-on: prod
+    name: Build and Deploy Solana Holder Bot
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -19,60 +18,75 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Login to Docker Hub (optional)
-        if: |
-          github.event_name != 'pull_request' &&
-          secrets.DOCKER_USERNAME != '' &&
-          secrets.DOCKER_PASSWORD != ''
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
-
-      - name: Build Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: ${{ secrets.DOCKER_USERNAME != '' && secrets.DOCKER_PASSWORD != '' }}
-          tags: solana-holder-bot:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Save image
+      - name: Stop and remove existing container
         run: |
-          docker save solana-holder-bot:latest -o image.tar
+          docker stop solana-holder-bot-prod || true
+          docker rm solana-holder-bot-prod || true
 
-      - name: Deploy to server
-        if: |
-          (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/prod') &&
-          secrets.DEPLOY_HOST != '' &&
-          secrets.DEPLOY_USER != '' &&
-          secrets.DEPLOY_SSH_KEY != ''
-        uses: appleboy/scp-action@master
-        with:
-          host: ${{ secrets.DEPLOY_HOST }}
-          username: ${{ secrets.DEPLOY_USER }}
-          key: ${{ secrets.DEPLOY_SSH_KEY }}
-          port: ${{ secrets.DEPLOY_PORT || 22 }}
-          source: "image.tar"
-          target: "/tmp/"
+      - name: Remove old images to force rebuild
+        shell: bash
+        run: |
+          docker rmi solana-holder-bot:latest || true
+          for img in $(docker images solana-holder-bot -q); do docker rmi -f $img || true; done
 
-      - name: Load and run on server
-        if: |
-          (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/prod') &&
-          secrets.DEPLOY_HOST != '' &&
-          secrets.DEPLOY_USER != '' &&
-          secrets.DEPLOY_SSH_KEY != ''
-        uses: appleboy/ssh-action@master
-        with:
-          host: ${{ secrets.DEPLOY_HOST }}
-          username: ${{ secrets.DEPLOY_USER }}
-          key: ${{ secrets.DEPLOY_SSH_KEY }}
-          port: ${{ secrets.DEPLOY_PORT || 22 }}
-          script: |
-            docker load -i /tmp/image.tar
-            cd /path/to/sol-bot || cd ~/sol-bot || true
-            docker-compose -f docker-compose.prod.yml down || true
-            docker-compose -f docker-compose.prod.yml up -d
-            docker rmi $(docker images -f "dangling=true" -q) || true
-            rm -f /tmp/image.tar
+      - name: Clean Docker build cache
+        run: |
+          docker builder prune -af || true
+          docker system prune -f || true
+
+      - name: Build Docker image (no cache, pull latest base)
+        run: |
+          docker build \
+            --no-cache \
+            --pull \
+            --build-arg BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ') \
+            --build-arg VCS_REF=$(git rev-parse --short HEAD) \
+            -t solana-holder-bot:latest \
+            -t solana-holder-bot:$(date +%s) \
+            .
+
+      - name: Run Docker container
+        env:
+          MINT_ADDRESS: ${{ vars.MINT_ADDRESS || '9AvytnUKsLxPxFHFqS6VLxaxt5p6BhYNr53SD2Chpump' }}
+          RPC_URL: ${{ vars.RPC_URL || 'https://api.mainnet-beta.solana.com' }}
+          INTERVAL: ${{ vars.INTERVAL || '30' }}
+          CACHE_TTL: ${{ vars.CACHE_TTL || '30' }}
+          MAX_RETRIES: ${{ vars.MAX_RETRIES || '3' }}
+          TIMEOUT: ${{ vars.TIMEOUT || '30' }}
+        run: |
+          docker run -d \
+            --name solana-holder-bot-prod \
+            --restart unless-stopped \
+            -p 56789:56789 \
+            -e MINT_ADDRESS="${MINT_ADDRESS}" \
+            -e RPC_URL="${RPC_URL}" \
+            -e INTERVAL="${INTERVAL}" \
+            -e CACHE_TTL="${CACHE_TTL}" \
+            -e MAX_RETRIES="${MAX_RETRIES}" \
+            -e TIMEOUT="${TIMEOUT}" \
+            solana-holder-bot:latest \
+            ./solana-holder-bot \
+              "${MINT_ADDRESS}" \
+              --rpc-url "${RPC_URL}" \
+              --interval "${INTERVAL}" \
+              --api \
+              --api-port 56789 \
+              --cache-ttl "${CACHE_TTL}" \
+              --max-retries "${MAX_RETRIES}" \
+              --timeout "${TIMEOUT}"
+
+      - name: Verify container is running
+        run: |
+          sleep 5
+          docker ps | grep solana-holder-bot-prod
+          docker logs solana-holder-bot-prod --tail 20
+
+      - name: Test API endpoint
+        run: |
+          sleep 3
+          curl -f http://localhost:56789/health || echo "API health check failed"
+
+      - name: Clean up old images and cache
+        run: |
+          docker image prune -af || true
+          docker builder prune -af || true

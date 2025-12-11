@@ -1,4 +1,9 @@
 # Multi-stage build for production
+ARG BUILD_DATE
+ARG VCS_REF
+LABEL org.label-schema.build-date=$BUILD_DATE \
+      org.label-schema.vcs-ref=$VCS_REF
+
 FROM rust:1.75-slim as builder
 
 # Install dependencies
