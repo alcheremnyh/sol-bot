@@ -31,6 +31,18 @@ pub struct Cli {
     /// RPC request timeout in seconds
     #[arg(long = "timeout", default_value = "30")]
     pub timeout: u64,
+
+    /// Enable API server
+    #[arg(long = "api")]
+    pub api_server: bool,
+
+    /// API server port
+    #[arg(long = "api-port", default_value = "56789")]
+    pub api_port: u16,
+
+    /// Cache TTL in seconds for API
+    #[arg(long = "cache-ttl", default_value = "30")]
+    pub cache_ttl: u64,
 }
 
 impl Cli {

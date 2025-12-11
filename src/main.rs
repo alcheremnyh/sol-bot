@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use clap::Parser;
 use solana_holder_bot::{
+    api::HolderCache,
     check_alerts, calculate_stats, extract_holders, format_timestamp, Cli, Metrics,
     SolanaRpcClient,
 };
@@ -48,6 +49,20 @@ async fn main() -> Result<()> {
         .await
         .context("RPC health check failed. Please check your RPC URL")?;
     info!("RPC connection healthy");
+
+    // Start API server if enabled
+    if cli.api_server {
+        let cache = Arc::new(HolderCache::new(rpc_client.clone(), cli.cache_ttl));
+        cache.start_refresh_task();
+        
+        let api_port = cli.api_port;
+        tokio::spawn(async move {
+            if let Err(e) = solana_holder_bot::api::start_api_server(cache, api_port).await {
+                error!("API server error: {}", e);
+            }
+        });
+        info!("🚀 API server enabled on port {} (cache refresh: {}s)", api_port, cli.cache_ttl);
+    }
 
     // Graceful shutdown handling
     let shutdown = Arc::new(AtomicBool::new(false));

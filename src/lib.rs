@@ -1,3 +1,4 @@
+pub mod api;
 pub mod cli;
 pub mod rpc_client;
 pub mod token_monitor;
