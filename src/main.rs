@@ -137,17 +137,32 @@ async fn monitor_holders(
     let start_time = std::time::Instant::now();
 
     // Fetch token accounts
+    let fetch_start = std::time::Instant::now();
     let accounts = rpc_client
         .get_token_accounts_by_mint(mint)
         .await
         .context("Failed to fetch token accounts")?;
+    let fetch_elapsed = fetch_start.elapsed();
 
     // Extract unique holders
+    let extract_start = std::time::Instant::now();
     let holders = extract_holders(&accounts)
         .context("Failed to extract holders from accounts")?;
+    let extract_elapsed = extract_start.elapsed();
 
     let holder_count = holders.len();
     let elapsed = start_time.elapsed();
+    
+    // Log detailed timing if request took too long
+    if elapsed.as_secs() > 10 {
+        warn!(
+            "Slow request detected: total={:.2}s, fetch={:.2}s, extract={:.2}s, accounts={}",
+            elapsed.as_secs_f64(),
+            fetch_elapsed.as_secs_f64(),
+            extract_elapsed.as_secs_f64(),
+            accounts.len()
+        );
+    }
 
     // Calculate statistics
     let stats = calculate_stats(holder_count, previous_count);

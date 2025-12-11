@@ -44,22 +44,40 @@ impl SolanaRpcClient {
         Ok(())
     }
 
-    /// Get token accounts by mint with retry logic
+    /// Get token accounts by mint with retry logic and timeout
     pub async fn get_token_accounts_by_mint(
         &self,
         mint: &Pubkey,
     ) -> Result<Vec<(Pubkey, Account)>> {
+        let start_time = std::time::Instant::now();
         let mut last_error = None;
         
         for attempt in 0..self.max_retries {
-            match self._get_token_accounts_by_mint(mint).await {
-                Ok(accounts) => {
+            // Apply timeout to each attempt
+            let result = tokio::time::timeout(
+                self.timeout,
+                self._get_token_accounts_by_mint(mint)
+            ).await;
+            
+            match result {
+                Ok(Ok(accounts)) => {
+                    let elapsed = start_time.elapsed();
                     if attempt > 0 {
-                        info!("Successfully retrieved  accounts after {} retries", attempt);
+                        info!("Successfully retrieved {} accounts after {} retries (total time: {:.2}s)", 
+                            accounts.len(), attempt, elapsed.as_secs_f64());
+                    } else {
+                        info!("Successfully retrieved {} accounts in {:.2}s", 
+                            accounts.len(), elapsed.as_secs_f64());
                     }
+                    
+                    // Warn if request took too long
+                    if elapsed.as_secs() > 10 {
+                        warn!("RPC request took {:.2}s (consider using a faster RPC endpoint)", elapsed.as_secs_f64());
+                    }
+                    
                     return Ok(accounts);
                 }
-                Err(e) => {
+                Ok(Err(e)) => {
                     let error_msg = format!("{}", e);
                     last_error = Some(e);
                     warn!(
@@ -74,9 +92,34 @@ impl SolanaRpcClient {
                         sleep(delay).await;
                     }
                 }
+                Err(_) => {
+                    // Timeout occurred
+                    let elapsed = start_time.elapsed();
+                    let timeout_error = anyhow::anyhow!(
+                        "RPC request timed out after {:?} (attempt {}/{})",
+                        self.timeout,
+                        attempt + 1,
+                        self.max_retries
+                    );
+                    last_error = Some(timeout_error);
+                    warn!(
+                        "RPC request timed out after {:?} (attempt {}/{})",
+                        self.timeout,
+                        attempt + 1,
+                        self.max_retries
+                    );
+                    if attempt < self.max_retries - 1 {
+                        let delay = Self::exponential_backoff(attempt);
+                        warn!("Retrying in {:?}...", delay);
+                        sleep(delay).await;
+                    }
+                }
             }
         }
 
+        let total_elapsed = start_time.elapsed();
+        error!("Failed to get token accounts after {} retries (total time: {:.2}s)", 
+            self.max_retries, total_elapsed.as_secs_f64());
         Err(last_error.unwrap().context("Failed to get token accounts after all retries"))
     }
 
@@ -157,6 +200,7 @@ impl SolanaRpcClient {
         // Rate limiting: small delay before request
         sleep(Duration::from_millis(100)).await;
 
+        let fetch_start = std::time::Instant::now();
         debug!("Fetching token accounts for mint: {}", mint);
         debug!("Using token program ID: {}", token_program_id);
         debug!("RPC URL: {}", self.client.url());
@@ -173,7 +217,13 @@ impl SolanaRpcClient {
                 )
             })?;
 
-        debug!("Fetched {} accounts from RPC", accounts.len());
+        let fetch_elapsed = fetch_start.elapsed();
+        debug!("Fetched {} accounts from RPC in {:.2}s", accounts.len(), fetch_elapsed.as_secs_f64());
+        
+        // Warn if RPC fetch took too long
+        if fetch_elapsed.as_secs() > 5 {
+            warn!("RPC fetch took {:.2}s - consider using a faster RPC endpoint", fetch_elapsed.as_secs_f64());
+        }
 
         let mut all_accounts = Vec::new();
 
