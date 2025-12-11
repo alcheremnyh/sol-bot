@@ -15,7 +15,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::time::{interval, Duration};
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 /// Cache entry for holder count
 #[derive(Debug, Clone)]
@@ -35,6 +35,7 @@ pub struct HolderCache {
     rpc_client: Arc<SolanaRpcClient>,
     refresh_interval: Duration,
     max_tokens: usize,  // Максимальное количество токенов в кэше
+    api_timeout: Duration,  // Таймаут для API запросов (короче чем RPC timeout)
 }
 
 impl HolderCache {
@@ -44,6 +45,7 @@ impl HolderCache {
             rpc_client,
             refresh_interval: Duration::from_secs(refresh_interval_secs),
             max_tokens: 2,  // Ограничение: максимум 2 токена
+            api_timeout: Duration::from_secs(30),  // API таймаут: 30 секунд (быстрее чем RPC timeout)
         }
     }
 
@@ -68,7 +70,9 @@ impl HolderCache {
 
                 // Refresh each mint
                 for mint_str in &mints_to_refresh {
-                    match Self::fetch_holder_count(&rpc_client, mint_str).await {
+                    // Use longer timeout for background refresh (no user waiting)
+                    let refresh_timeout = Duration::from_secs(90);
+                    match Self::fetch_holder_count(&rpc_client, mint_str, refresh_timeout).await {
                         Ok(count) => {
                             let mint = match Pubkey::from_str(mint_str) {
                                 Ok(m) => m,
@@ -131,7 +135,17 @@ impl HolderCache {
 
         // Not in cache, fetch it
         info!("Cache miss for {}, fetching from RPC...", mint_str);
-        let count = Self::fetch_holder_count(&self.rpc_client, mint_str).await?;
+        let fetch_start = std::time::Instant::now();
+        let count = match Self::fetch_holder_count(&self.rpc_client, mint_str, self.api_timeout).await {
+            Ok(count) => count,
+            Err(e) => {
+                let elapsed = fetch_start.elapsed();
+                warn!("Failed to fetch holders for {} after {:.2}s: {}", mint_str, elapsed.as_secs_f64(), e);
+                return Err(e);
+            }
+        };
+        let fetch_elapsed = fetch_start.elapsed();
+        info!("Fetched holders for {} in {:.2}s: {} holders", mint_str, fetch_elapsed.as_secs_f64(), count);
         let mint = Pubkey::from_str(mint_str)
             .context("Invalid mint address")?;
 
@@ -196,7 +210,7 @@ impl HolderCache {
         }
     }
 
-    /// Fetch holder count from RPC
+    /// Fetch holder count from RPC with timeout
     async fn fetch_holder_count(
         rpc_client: &SolanaRpcClient,
         mint_str: &str,
@@ -204,10 +218,26 @@ impl HolderCache {
         let mint = Pubkey::from_str(mint_str)
             .context("Invalid mint address")?;
 
-        let accounts = rpc_client
-            .get_token_accounts_by_mint(&mint)
-            .await
-            .context("Failed to fetch token accounts")?;
+        // Apply API-level timeout (45 seconds max for API requests)
+        // This is shorter than RPC timeout to fail fast for API users
+        let api_timeout = Duration::from_secs(45);
+        let fetch_result = tokio::time::timeout(
+            api_timeout,
+            rpc_client.get_token_accounts_by_mint(&mint)
+        ).await;
+
+        let accounts = match fetch_result {
+            Ok(Ok(accounts)) => accounts,
+            Ok(Err(e)) => {
+                return Err(e).context("Failed to fetch token accounts");
+            }
+            Err(_) => {
+                return Err(anyhow::anyhow!(
+                    "RPC request timed out after {} seconds. Please try again later or use a faster RPC endpoint.",
+                    api_timeout.as_secs()
+                ));
+            }
+        };
 
         let holders = extract_holders(&accounts)
             .context("Failed to extract holders")?;
@@ -247,7 +277,12 @@ async fn get_holders(
             }))
         },
         Err(e) => {
-            error!("Error getting holder count: {}", e);
+            error!("Error getting holder count for {}: {}", mint_str, e);
+            // Return more specific error for timeout
+            let error_msg = format!("{}", e);
+            if error_msg.contains("timed out") {
+                return Err(StatusCode::GATEWAY_TIMEOUT);
+            }
             Err(StatusCode::INTERNAL_SERVER_ERROR)
         }
     }
