@@ -45,7 +45,7 @@ impl HolderCache {
             rpc_client,
             refresh_interval: Duration::from_secs(refresh_interval_secs),
             max_tokens: 2,  // Ограничение: максимум 2 токена
-            api_timeout: Duration::from_secs(30),  // API таймаут: 30 секунд (быстрее чем RPC timeout)
+            api_timeout: Duration::from_secs(5),  // API таймаут: 30 секунд (быстрее чем RPC timeout)
         }
     }
 
