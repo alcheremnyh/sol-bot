@@ -8,7 +8,7 @@ use solana_sdk::commitment_config::CommitmentConfig;
 use std::str::FromStr;
 use std::time::Duration;
 use tokio::time::sleep;
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 
 /// RPC client wrapper with retry logic and health checks
 pub struct SolanaRpcClient {
