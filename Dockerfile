@@ -1,10 +1,8 @@
 # Multi-stage build for production
+FROM rust:1.75-slim as builder
+
 ARG BUILD_DATE
 ARG VCS_REF
-LABEL org.label-schema.build-date=$BUILD_DATE \
-      org.label-schema.vcs-ref=$VCS_REF
-
-FROM rust:1.75-slim as builder
 
 # Install dependencies
 RUN apt-get update && apt-get install -y \
@@ -16,16 +14,22 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 
 # Copy manifest files
-COPY Cargo.toml Cargo.lock ./
+COPY Cargo.toml ./
 
 # Copy source code
 COPY src ./src
 
-# Build release binary
+# Generate Cargo.lock if it doesn't exist and build
+RUN cargo generate-lockfile || true
 RUN cargo build --release
 
 # Runtime stage
 FROM debian:bookworm-slim
+
+ARG BUILD_DATE
+ARG VCS_REF
+LABEL org.label-schema.build-date=$BUILD_DATE \
+    org.label-schema.vcs-ref=$VCS_REF
 
 # Install runtime dependencies
 RUN apt-get update && apt-get install -y \

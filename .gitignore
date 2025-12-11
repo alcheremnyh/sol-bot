@@ -1,7 +1,7 @@
 # Rust
 /target/
 **/*.rs.bk
-Cargo.lock
+# Cargo.lock - keep it for binaries (should be committed for binary projects)
 
 # IDE
 .idea/
