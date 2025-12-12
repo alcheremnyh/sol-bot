@@ -45,7 +45,7 @@ impl HolderCache {
             rpc_client,
             refresh_interval: Duration::from_secs(refresh_interval_secs),
             max_tokens: 2,  // Ограничение: максимум 2 токена
-            api_timeout: Duration::from_secs(5),  // API таймаут: 30 секунд (быстрее чем RPC timeout)
+            api_timeout: Duration::from_secs(90),  // API таймаут: 30 секунд (быстрее чем RPC timeout)
         }
     }
 
@@ -54,7 +54,6 @@ impl HolderCache {
         let cache = self.cache.clone();
         let rpc_client = self.rpc_client.clone();
         let interval_duration = self.refresh_interval;
-        let mut mints_to_refresh = Vec::new();
 
         tokio::spawn(async move {
             let mut refresh_timer = interval(interval_duration);
@@ -63,10 +62,10 @@ impl HolderCache {
                 refresh_timer.tick().await;
 
                 // Collect all mints that need refresh
-                {
+                let mints_to_refresh: Vec<String> = {
                     let cache_read = cache.read().await;
-                    mints_to_refresh = cache_read.keys().cloned().collect();
-                }
+                    cache_read.keys().cloned().collect()
+                };
 
                 // Refresh each mint
                 for mint_str in &mints_to_refresh {

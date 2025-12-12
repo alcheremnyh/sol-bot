@@ -47,7 +47,7 @@ jobs:
 
       - name: Run Docker container
         env:
-          MINT_ADDRESS: ${{ vars.MINT_ADDRESS || '9AvytnUKsLxPxFHFqS6VLxaxt5p6BhYNr53SD2Chpump' }}
+          MINT_ADDRESS: ${{ vars.MINT_ADDRESS || '5AgiTyu3StT3PQYWAkHkg24ugW3TPqYRmQwhVu2fpump' }}
           RPC_URL: ${{ vars.RPC_URL || 'https://api.mainnet-beta.solana.com' }}
           INTERVAL: ${{ vars.INTERVAL || '30' }}
           CACHE_TTL: ${{ vars.CACHE_TTL || '30' }}

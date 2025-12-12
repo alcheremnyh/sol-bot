@@ -11,7 +11,7 @@ echo Press Ctrl+C to stop and view metrics
 echo ========================================
 echo.
 
-.\target\release\solana-holder-bot.exe 9AvytnUKsLxPxFHFqS6VLxaxt5p6BhYNr53SD2Chpump --rpc-url https://api.mainnet-beta.solana.com --interval 30
+.\target\release\solana-holder-bot.exe 5AgiTyu3StT3PQYWAkHkg24ugW3TPqYRmQwhVu2fpump --rpc-url https://api.mainnet-beta.solana.com --interval 30
 
 pause
 
